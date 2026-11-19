@@ -7,6 +7,7 @@
 // {
 //   id: '401910015',           // id real del partido en la API de ESPN
 //   date: '2026-11-19',        // fecha del partido (YYYY-MM-DD, hora española)
+//   jornada: '2026-11-19',     // jornada NBA (fecha de liga en EE. UU.)
 //   away: 'Boston Celtics',    // equipo visitante
 //   home: 'Denver Nuggets',    // equipo local
 //   pickedSide: 'away',        // 'away' | 'home': equipo elegido
@@ -14,19 +15,18 @@
 //   result: 'pending',         // 'pending' | 'win' | 'loss'
 // }
 //
+// 'jornada' es la clave del calendario (fecha de la jornada NBA en horario
+// de Estados Unidos). Los registros antiguos, creados antes del calendario,
+// no la llevan: se completa con migratePicksToJornada() al consultar el
+// Historial, sin perder ningún dato.
+//
 // 'result' pasa a 'win' o 'loss' cuando ESPN confirma el resultado final
 // ('post') y se compara el ganador real con la elección; hasta entonces
 // queda en 'pending' (se muestra como "Pendiente" en el Historial).
 
 const STORAGE_KEY = 'nba-stats:picks'
 
-const DAY_LABEL_FORMATTER = new Intl.DateTimeFormat('es-ES', {
-  timeZone: 'Europe/Madrid',
-  weekday: 'long',
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-})
+const JORNADA_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 // ---------- Lectura y escritura seguras ----------
 
@@ -51,7 +51,13 @@ export function loadPicks() {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isValidPick)
+    // Un registro sin jornada válida se conserva; solo se descarta el campo
+    // para que la migración pueda completarlo más adelante.
+    return parsed.filter(isValidPick).map((pick) =>
+      typeof pick.jornada === 'string' && JORNADA_PATTERN.test(pick.jornada)
+        ? pick
+        : { ...pick, jornada: undefined },
+    )
   } catch {
     return []
   }
@@ -76,6 +82,9 @@ export function upsertPick(game, pickedSide) {
   const pick = {
     id: game.id,
     date: game.dateKey ?? game.date.slice(0, 10),
+    // Jornada NBA (fecha de liga en EE. UU.): la clave del calendario. Los
+    // partidos normalizados la traen sellada desde la consulta a ESPN.
+    jornada: game.jornadaKey ?? game.dateKey ?? game.date.slice(0, 10),
     away: game.away.name,
     home: game.home.name,
     pickedSide,
@@ -95,6 +104,46 @@ export function removePick(gameId) {
   const next = picks.filter((item) => item.id !== gameId)
   if (next.length !== picks.length) savePicks(next)
   return next
+}
+
+// ---------- Migración de registros antiguos ----------
+
+// Asigna la jornada NBA a los registros creados antes del calendario, usando
+// los partidos recibidos de ESPN (se consultan las fechas españolas de esos
+// registros). Si un partido no aparece, se conserva la fecha española como
+// jornada aproximada: nunca se pierde ningún registro. Devuelve la misma
+// lista si nada cambia y persiste los cambios.
+export function migratePicksToJornada(picks, games) {
+  const byId = new Map(games.map((game) => [game.id, game]))
+  let changed = false
+  const next = picks.map((pick) => {
+    if (pick.jornada) return pick
+    changed = true
+    const jornada = byId.get(pick.id)?.jornadaKey ?? pick.date
+    return { ...pick, jornada }
+  })
+  if (changed) savePicks(next)
+  return changed ? next : picks
+}
+
+// ---------- Estadísticas diarias ----------
+
+// Resumen de los pronósticos de una jornada. El porcentaje de acierto solo
+// cuenta los partidos decididos: aciertos / (aciertos + fallos) × 100; los
+// pendientes no entran en el denominador. Sin partidos decididos se
+// devuelve null (se muestra "—%" para no dar una impresión errónea).
+export function dailyStats(items) {
+  const wins = items.filter((item) => item.result === 'win').length
+  const losses = items.filter((item) => item.result === 'loss').length
+  const pending = items.filter((item) => item.result === 'pending').length
+  const decided = wins + losses
+  return {
+    count: items.length,
+    wins,
+    losses,
+    pending,
+    percent: decided > 0 ? (wins / decided) * 100 : null,
+  }
 }
 
 // ---------- Resolución de resultados con datos de ESPN ----------
@@ -132,37 +181,4 @@ export function resolveResults(picks, games) {
   })
   if (changed) savePicks(next)
   return changed ? next : picks
-}
-
-// ---------- Consulta del historial ----------
-
-// Agrupa los pronósticos por fecha (de la más reciente a la más antigua) y
-// calcula el resumen diario: aciertos, fallos y pendientes.
-export function groupPredictionsByDate(list) {
-  const byDate = new Map()
-
-  for (const prediction of list) {
-    const items = byDate.get(prediction.date)
-    if (items) {
-      items.push(prediction)
-    } else {
-      byDate.set(prediction.date, [prediction])
-    }
-  }
-
-  return [...byDate.entries()]
-    .sort(([dateA], [dateB]) => dateB.localeCompare(dateA))
-    .map(([date, items]) => ({
-      date,
-      items,
-      count: items.length,
-      wins: items.filter((item) => item.result === 'win').length,
-      losses: items.filter((item) => item.result === 'loss').length,
-      pending: items.filter((item) => item.result === 'pending').length,
-    }))
-}
-
-// Fecha legible en español: "jueves, 19 de noviembre de 2026".
-export function formatDayLabel(date) {
-  return DAY_LABEL_FORMATTER.format(new Date(`${date}T12:00:00`))
 }

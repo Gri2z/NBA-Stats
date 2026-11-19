@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
+import DateNav from '../components/DateNav.jsx'
 import {
+  currentJornadaKey,
   etDatesForSpanishDate,
   fetchNbaScoreboard,
 } from '../api/espn.js'
 import {
-  formatDayLabel,
-  groupPredictionsByDate,
+  dailyStats,
   loadPicks,
+  migratePicksToJornada,
   resolveResults,
 } from '../data/predictions.js'
 
@@ -14,6 +16,13 @@ const RESULT_LABELS = {
   win: 'Acierto',
   loss: 'Fallo',
   pending: 'Pendiente',
+}
+
+// Porcentaje diario con formato español: "66,7 %". Sin partidos decididos
+// se muestra "—%" (nunca 0 %, que daría una impresión errónea).
+function formatPercent(value) {
+  if (typeof value !== 'number') return '—%'
+  return `${value.toLocaleString('es-ES', { maximumFractionDigits: 1 })} %`
 }
 
 function EmptyIcon() {
@@ -37,22 +46,25 @@ function EmptyIcon() {
 }
 
 function HistorialPage() {
+  // Fecha seleccionada en el calendario: una jornada NBA (fecha de liga en
+  // EE. UU.), igual que en Partidos. Por defecto, la jornada vigente.
+  const [selectedDate, setSelectedDate] = useState(() => currentJornadaKey())
   const [picks, setPicks] = useState(loadPicks)
-  const [loading, setLoading] = useState(() => loadPicks().length > 0)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
 
-  // Consulta a ESPN los partidos de cada fecha con pronóstico para saber el
-  // resultado real. Si no hay pronósticos, no se hace ninguna petición.
+  // Consulta a ESPN lo mínimo: los partidos de los registros antiguos que
+  // falte migrar y los de la jornada seleccionada cuando haya resultados
+  // pendientes de resolver. Sin pronósticos no se hace ninguna petición.
   useEffect(() => {
     let active = true
 
     async function load() {
       const stored = loadPicks()
       if (stored.length === 0) {
-        // Sin pronósticos no hay nada que consultar ni que mostrar.
         if (active) {
-          setPicks((current) => (current.length > 0 ? [] : current))
+          setPicks([])
           setError(null)
           setLoading(false)
         }
@@ -61,16 +73,38 @@ function HistorialPage() {
 
       setLoading(true)
       try {
-        const dateKeys = [...new Set(stored.map((item) => item.date))]
-        const queryDates = [
-          ...new Set(dateKeys.flatMap((dateKey) => etDatesForSpanishDate(dateKey))),
-        ]
-        const results = await Promise.all(
-          queryDates.map((dates) => fetchNbaScoreboard(dates)),
-        )
+        let next = stored
+        // Partidos ya consultados, por clave de consulta (YYYYMMDD).
+        const fetched = new Map()
+
+        // 1) Migración de registros antiguos sin jornada: se consultan sus
+        //    fechas españolas en ESPN y se les asigna la jornada real.
+        const unmigrated = next.filter((item) => !item.jornada)
+        if (unmigrated.length > 0) {
+          const queries = [
+            ...new Set(
+              unmigrated.flatMap((item) => etDatesForSpanishDate(item.date)),
+            ),
+          ]
+          const results = await Promise.all(
+            queries.map((dates) => fetchNbaScoreboard(dates)),
+          )
+          queries.forEach((dates, index) => fetched.set(dates, results[index]))
+          next = migratePicksToJornada(next, [...fetched.values()].flat())
+        }
+
+        // 2) Partidos de la jornada seleccionada, solo si queda algo por
+        //    resolver (las fechas sin pronósticos no generan consultas).
+        const visible = next.filter((item) => item.jornada === selectedDate)
+        const needsResults = visible.some((item) => item.result === 'pending')
+        const queryKey = selectedDate.replace(/-/g, '')
+        if (needsResults && !fetched.has(queryKey)) {
+          fetched.set(queryKey, await fetchNbaScoreboard(queryKey))
+        }
+
         if (!active) return
-        const games = results.flat()
-        setPicks(resolveResults(stored, games))
+        next = resolveResults(next, [...fetched.values()].flat())
+        setPicks(next)
         setError(null)
       } catch (err) {
         if (!active) return
@@ -88,11 +122,18 @@ function HistorialPage() {
     return () => {
       active = false
     }
-  }, [reloadKey])
+  }, [selectedDate, reloadKey])
 
   const handleRetry = () => setReloadKey((key) => key + 1)
 
-  const days = groupPredictionsByDate(picks)
+  const handleDateChange = (dateKey) => {
+    if (dateKey === selectedDate) return
+    setSelectedDate(dateKey)
+  }
+
+  const dayPicks = picks.filter((item) => item.jornada === selectedDate)
+  const stats = dailyStats(dayPicks)
+  const hasPicks = picks.length > 0
 
   return (
     <section className="section" id="historial">
@@ -103,9 +144,18 @@ function HistorialPage() {
         </div>
       </div>
       <p className="section-lead">
-        Tus pronósticos de partidos de la NBA organizados por fecha, de la más
-        reciente a la más antigua, con el equipo elegido como ganador y el
-        resultado de cada uno.
+        Consulta tus pronósticos por jornada NBA (fecha en Estados Unidos),
+        con el enfrentamiento, el equipo elegido y el resultado de cada uno.
+        Los horarios de los partidos se muestran en hora española.
+      </p>
+
+      <DateNav
+        value={selectedDate}
+        today={currentJornadaKey()}
+        onChange={handleDateChange}
+      />
+      <p className="date-nav-note">
+        Las fechas del calendario corresponden a jornadas NBA.
       </p>
 
       {loading && (
@@ -125,81 +175,77 @@ function HistorialPage() {
         </div>
       )}
 
-      {!loading && days.length === 0 && (
+      {!loading && !error && !hasPicks && (
         <div className="state-box">
           <EmptyIcon />
           <p className="state-title">Todavía no hay pronósticos registrados</p>
           <p>
-            Elige un equipo en la página de Partidos: aquí verás cada fecha con
-            tus pronósticos, el equipo elegido y si acertaste o fallaste cuando
-            el partido termine.
+            Elige un equipo en la página de Partidos: aquí verás cada jornada
+            con tus pronósticos, el equipo elegido y si acertaste o fallaste
+            cuando el partido termine.
           </p>
         </div>
       )}
 
-      {!loading && days.length > 0 && (
-        <div className="history-days">
-          {days.map((day) => (
-            <article key={day.date} className="history-day">
-              <header className="history-day-head">
-                <div>
-                  <h2 className="history-day-date">{formatDayLabel(day.date)}</h2>
-                  <span className="history-day-count">
-                    {day.count > 0
-                      ? `${day.count} pronóstico${day.count === 1 ? '' : 's'}`
-                      : 'Sin pronósticos'}
-                  </span>
-                </div>
-                <div className="history-day-summary">
-                  {day.wins > 0 && (
-                    <span className="summary-chip summary-chip--win">
-                      {day.wins} acierto{day.wins === 1 ? '' : 's'}
-                    </span>
-                  )}
-                  {day.losses > 0 && (
-                    <span className="summary-chip summary-chip--loss">
-                      {day.losses} fallo{day.losses === 1 ? '' : 's'}
-                    </span>
-                  )}
-                  {day.pending > 0 && (
-                    <span className="summary-chip summary-chip--pending">
-                      {day.pending} pendiente{day.pending === 1 ? '' : 's'}
-                    </span>
-                  )}
-                </div>
-              </header>
+      {!loading && !error && hasPicks && (
+        <>
+          <div className="day-stats" role="group" aria-label="Resumen del día">
+            <div className="stat-card">
+              <span className="stat-label">Pronósticos</span>
+              <span className="stat-value">{stats.count}</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Aciertos</span>
+              <span className="stat-value stat-value--win">{stats.wins}</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Fallos</span>
+              <span className="stat-value stat-value--loss">{stats.losses}</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Pendientes</span>
+              <span className="stat-value stat-value--pending">
+                {stats.pending}
+              </span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Porcentaje diario</span>
+              <span className="stat-value stat-value--percent">
+                {formatPercent(stats.percent)}
+              </span>
+            </div>
+          </div>
 
-              {day.items.length > 0 ? (
-                <ul className="history-list">
-                  {day.items.map((prediction) => (
-                    <li
-                      key={prediction.id}
-                      className={`history-item history-item--${prediction.result}`}
-                    >
-                      <div className="history-match">
-                        <strong>
-                          {prediction.away} @ {prediction.home}
-                        </strong>
-                        <span>
-                          Ganador elegido: {prediction.pickedWinner}
-                        </span>
-                      </div>
-                      <span
-                        className={`result-badge result-badge--${prediction.result}`}
-                      >
-                        {RESULT_LABELS[prediction.result] ?? 'Pendiente'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="history-day-empty">
-                  Sin pronósticos registrados en esta fecha.
-                </p>
-              )}
-            </article>
-          ))}
-        </div>
+          {dayPicks.length > 0 ? (
+            <ul className="history-list">
+              {dayPicks.map((prediction) => (
+                <li
+                  key={prediction.id}
+                  className={`history-item history-item--${prediction.result}`}
+                >
+                  <div className="history-match">
+                    <strong>
+                      {prediction.away} @ {prediction.home}
+                    </strong>
+                    <span>Ganador elegido: {prediction.pickedWinner}</span>
+                  </div>
+                  <span
+                    className={`result-badge result-badge--${prediction.result}`}
+                  >
+                    {RESULT_LABELS[prediction.result] ?? 'Pendiente'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="state-box">
+              <p className="state-title">No realizaste pronósticos este día</p>
+              <p>
+                Usa las flechas o el calendario para elegir otra jornada NBA.
+              </p>
+            </div>
+          )}
+        </>
       )}
     </section>
   )

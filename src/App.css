@@ -554,90 +554,328 @@ h2 {
   color: var(--muted);
 }
 
-/* ---------- Historial de pronósticos ---------- */
+/* ---------- Navegación por fechas (jornadas NBA) ---------- */
 
-.history-days {
+.date-nav {
   display: flex;
-  flex-direction: column;
-  gap: 20px;
-  margin-top: 24px;
+  align-items: center;
+  margin-top: 26px;
 }
 
-.history-day {
-  padding: 18px 20px;
+.date-nav-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.date-nav-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    color 0.2s;
 }
 
-.history-day-head {
+.date-nav-arrow:hover {
+  background: var(--blue-soft);
+  border-color: rgba(47, 111, 237, 0.55);
+  color: var(--text-strong);
+}
+
+.date-nav-arrow svg {
+  width: 16px;
+  height: 16px;
+}
+
+.date-nav-picker {
+  position: relative;
+}
+
+.date-nav-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  height: 40px;
+  padding: 0 14px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
+}
+
+.date-nav-current:hover {
+  background: var(--blue-soft);
+  border-color: rgba(47, 111, 237, 0.55);
+}
+
+.date-nav-current > svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--blue-light);
+}
+
+.date-nav-current span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.date-nav-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+}
+
+.date-nav-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.date-nav-today {
+  height: 40px;
+  padding: 0 16px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--blue-light);
+  background: var(--blue-soft);
+  border: 1px solid rgba(47, 111, 237, 0.45);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
+}
+
+.date-nav-today:hover {
+  background: rgba(47, 111, 237, 0.26);
+  border-color: var(--blue-light);
+}
+
+.date-nav-arrow:focus-visible,
+.date-nav-current:focus-visible,
+.date-nav-today:focus-visible,
+.date-calendar-month-arrow:focus-visible,
+.date-calendar-day:focus-visible {
+  outline: 2px solid var(--blue-light);
+  outline-offset: 2px;
+}
+
+.date-nav-note {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  max-width: 72ch;
+}
+
+/* Calendario desplegable (compacto: se abre solo al pulsar la fecha). */
+
+.date-calendar {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: min(300px, calc(100vw - 48px));
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  transform-origin: top left;
+  animation: date-pop 0.16s ease;
+}
+
+@keyframes date-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.date-calendar-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding-bottom: 14px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
-.history-day-date {
-  font-size: 17px;
-  line-height: 1.3;
+.date-calendar-month {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
 }
 
-.history-day-count {
-  display: block;
-  margin-top: 3px;
-  font-size: 12px;
+.date-calendar-month-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    color 0.2s;
+}
+
+.date-calendar-month-arrow:hover {
+  background: var(--blue-soft);
+  border-color: rgba(47, 111, 237, 0.55);
+  color: var(--text-strong);
+}
+
+.date-calendar-month-arrow svg {
+  width: 14px;
+  height: 14px;
+}
+
+.date-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.date-calendar-grid--weekdays {
+  margin-bottom: 4px;
+}
+
+.date-calendar-weekday {
+  display: grid;
+  place-items: center;
+  height: 22px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.date-calendar-day {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.date-calendar-day:hover {
+  background: var(--blue-soft);
+  border-color: rgba(47, 111, 237, 0.45);
+  color: var(--text-strong);
+}
+
+.date-calendar-day.is-today {
+  border-color: rgba(47, 111, 237, 0.55);
+  color: var(--blue-light);
+}
+
+.date-calendar-day.is-selected,
+.date-calendar-day.is-selected:hover {
+  background: var(--blue);
+  border-color: var(--blue-light);
+  color: #fff;
+}
+
+.date-calendar-day--gap {
+  pointer-events: none;
+}
+
+/* ---------- Historial de pronósticos ---------- */
+
+/* Resumen diario bajo la fecha seleccionada. */
+.day-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
 }
 
-.history-day-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
 }
 
-.summary-chip {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
-
-.summary-chip--win {
+.stat-value--win {
   color: var(--green);
-  background: rgba(52, 211, 153, 0.12);
-  border-color: rgba(52, 211, 153, 0.4);
 }
 
-.summary-chip--loss {
+.stat-value--loss {
   color: var(--red);
-  background: rgba(251, 113, 133, 0.1);
-  border-color: rgba(251, 113, 133, 0.4);
 }
 
-.summary-chip--pending {
+.stat-value--pending,
+.stat-value--percent {
   color: var(--blue-light);
-  background: var(--blue-soft);
-  border-color: rgba(47, 111, 237, 0.4);
-}
-
-.history-day-empty {
-  font-size: 14px;
-  font-style: italic;
-  color: var(--muted);
 }
 
 .history-list {
   list-style: none;
-  margin: 0;
+  margin: 20px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -894,6 +1132,33 @@ h2 {
   .result-badge {
     justify-self: start;
   }
+
+  .date-nav-controls {
+    gap: 6px;
+  }
+
+  .date-nav-current {
+    font-size: 13px;
+    gap: 7px;
+    padding: 0 11px;
+  }
+
+  .date-nav-today {
+    padding: 0 13px;
+    font-size: 12px;
+  }
+
+  .date-calendar {
+    width: min(300px, calc(100vw - 40px));
+  }
+
+  .day-stats {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+
+  .stat-card {
+    padding: 12px 14px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -914,5 +1179,18 @@ h2 {
   .spinner,
   .live-dot {
     animation: none;
+  }
+
+  .date-calendar {
+    animation: none;
+  }
+
+  .date-nav-arrow,
+  .date-nav-current,
+  .date-nav-today,
+  .date-nav-chevron,
+  .date-calendar-month-arrow,
+  .date-calendar-day {
+    transition: none;
   }
 }

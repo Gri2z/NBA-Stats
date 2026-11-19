@@ -1,5 +1,11 @@
-import { useEffect, useState } from 'react'
-import { fetchJornada, formatGameLine } from '../api/espn.js'
+import { useEffect, useRef, useState } from 'react'
+import DateNav from '../components/DateNav.jsx'
+import {
+  currentJornadaKey,
+  fetchNbaScoreboard,
+  formatGameLine,
+  jornadaRefreshPlan,
+} from '../api/espn.js'
 import { getWinProbability } from '../data/probabilities.js'
 import {
   loadPicks,
@@ -235,6 +241,9 @@ function GameCard({ game, pick, open, onToggle, onPick }) {
 }
 
 function PartidosPage() {
+  // Fecha seleccionada en el calendario: una jornada NBA (fecha de liga en
+  // EE. UU.). Por defecto, la jornada vigente.
+  const [selectedDate, setSelectedDate] = useState(() => currentJornadaKey())
   const [games, setGames] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -242,16 +251,18 @@ function PartidosPage() {
   const [picks, setPicks] = useState(loadPicks)
   // Solo un desplegable abierto a la vez (id del partido, o null).
   const [openGameId, setOpenGameId] = useState(null)
+  // ¿Debe la selección seguir a la jornada vigente? Solo mientras el usuario
+  // no elija una fecha a mano (una fecha manual no se cambia sola jamás).
+  const followsCurrentRef = useRef(true)
 
   useEffect(() => {
     let active = true
 
     async function load() {
       try {
-        // Consulta la jornada vigente (fecha ET recalculada en cada
-        // llamada): el cambio de jornada se detecta en esta misma
-        // actualización de 60 s, sin recargar la página.
-        const data = await fetchJornada()
+        // Partidos reales de la jornada seleccionada (?dates=YYYYMMDD); la
+        // clave del calendario es 'YYYY-MM-DD' y ESPN espera solo dígitos.
+        const data = await fetchNbaScoreboard(selectedDate.replace(/-/g, ''))
         if (!active) return
         setGames(data)
         setError(null)
@@ -271,12 +282,42 @@ function PartidosPage() {
     }
 
     load()
-    const intervalId = setInterval(load, 60000)
+
+    // Actualización automática cada 60 s para la jornada vigente; las fechas
+    // pasadas no se refrescan (datos estables) y las futuras, cuando
+    // corresponda. En cada tick se comprueba si ha cambiado la jornada.
+    const intervalId = setInterval(() => {
+      const { current, pollMs } = jornadaRefreshPlan(selectedDate)
+      if (followsCurrentRef.current && current !== selectedDate) {
+        // Nueva jornada vigente: se actualiza sola la fecha seleccionada
+        // (solo si el usuario no ha elegido otra a mano).
+        setGames(null)
+        setLoading(true)
+        setError(null)
+        setOpenGameId(null)
+        setSelectedDate(current)
+        return
+      }
+      if (pollMs !== null) load()
+    }, 60000)
+
     return () => {
       active = false
       clearInterval(intervalId)
     }
-  }, [reloadKey])
+  }, [selectedDate, reloadKey])
+
+  const handleDateChange = (dateKey) => {
+    // Elegir la jornada vigente (o "Hoy") reanuda el seguimiento automático;
+    // cualquier otra fecha deja de seguirla para no cambiar la elección.
+    followsCurrentRef.current = dateKey === currentJornadaKey()
+    if (dateKey === selectedDate) return
+    setGames(null)
+    setLoading(true)
+    setError(null)
+    setOpenGameId(null)
+    setSelectedDate(dateKey)
+  }
 
   const handleRetry = () => {
     setLoading(true)
@@ -312,9 +353,21 @@ function PartidosPage() {
         <span className="source-pill">Datos reales · ESPN</span>
       </div>
       <p className="section-lead">
-        Partidos reales obtenidos de ESPN. Los horarios se muestran en hora
-        española y el marcador se actualiza automáticamente mientras hay
-        partidos en directo.
+        Partidos reales obtenidos de ESPN. Elige una fecha para ver su jornada:
+        cada fecha del calendario es una jornada NBA (según la fecha en
+        Estados Unidos) y los horarios se muestran en hora española, así que
+        algún partido puede aparecer de madrugada del día siguiente. El
+        marcador se actualiza automáticamente mientras hay partidos en directo.
+      </p>
+
+      <DateNav
+        value={selectedDate}
+        today={currentJornadaKey()}
+        onChange={handleDateChange}
+      />
+      <p className="date-nav-note">
+        Las fechas del calendario corresponden a jornadas NBA; los horarios de
+        los partidos se muestran en hora española.
       </p>
 
       {loading && games === null && (
@@ -336,7 +389,7 @@ function PartidosPage() {
 
       {games !== null && games.length === 0 && !error && (
         <div className="state-box">
-          <p>No hay partidos de la NBA programados en este momento.</p>
+          <p>No hay partidos de la NBA programados en esta jornada.</p>
         </div>
       )}
 

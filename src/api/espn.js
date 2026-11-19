@@ -2,6 +2,8 @@
 // ESPN envía cabeceras CORS abiertas, así que el navegador puede consultarla
 // directamente desde la aplicación.
 
+import { shiftDateKey } from '../utils/dates.js'
+
 const SCOREBOARD_URL =
   'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard'
 
@@ -174,7 +176,7 @@ function normalizeCompetitor(competitor) {
   }
 }
 
-function normalizeEvent(event) {
+function normalizeEvent(event, jornadaKey) {
   const competition = event?.competitions?.[0]
   const status = competition?.status ?? event?.status ?? null
   const { state, statusLabel, phaseLabel, clock } = describeStatus(status)
@@ -185,7 +187,11 @@ function normalizeEvent(event) {
   return {
     id: event.id,
     date: event.date,
+    // Fecha en España (para mostrar el horario del partido).
     dateKey: dateKeyFromISO(event.date),
+    // Jornada NBA: la fecha de liga (ET) a la que pertenece el partido. Se
+    // sella con la fecha consultada (?dates=), que es el criterio de ESPN.
+    jornadaKey,
     state,
     statusLabel,
     phaseLabel,
@@ -199,7 +205,8 @@ function normalizeEvent(event) {
 const QUERY_DATE_PATTERN = /^\d{8}$/
 
 // `dates` permite consultar un día concreto (YYYYMMDD); sin parámetro se
-// devuelven los partidos del día de liga actual.
+// devuelven los partidos del día de liga actual. Siempre que se pasa una
+// fecha, cada partido recibe su `jornadaKey` sellada con esa consulta.
 export async function fetchNbaScoreboard(dates) {
   if (dates !== undefined && !QUERY_DATE_PATTERN.test(dates)) {
     throw new Error(`Fecha de consulta no válida: ${dates}`)
@@ -213,7 +220,18 @@ export async function fetchNbaScoreboard(dates) {
   }
   const data = await response.json()
   const events = Array.isArray(data?.events) ? data.events : []
-  return events.map(normalizeEvent)
+  const jornadaKey = dates
+    ? `${dates.slice(0, 4)}-${dates.slice(4, 6)}-${dates.slice(6, 8)}`
+    : null
+  return events.map((event) =>
+    normalizeEvent(event, jornadaKey ?? etJornadaKey(event.date)),
+  )
+}
+
+// Jornada NBA (fecha ET) de una fecha ISO de ESPN, usada como respaldo
+// cuando la consulta no lleva parámetro `dates`.
+function etJornadaKey(date) {
+  return ET_DATE_FORMATTER.format(new Date(date))
 }
 
 export function formatGameDate(date) {
@@ -260,48 +278,29 @@ const ET_HOUR_FORMATTER = new Intl.DateTimeFormat('en-US', {
 
 // Tras la medianoche ET aún pueden estar en juego partidos de la jornada
 // anterior (finales tardíos y prórrogas rara vez pasan de las 03:30 ET):
-// hasta las 04:00 ET se consulta también la jornada anterior.
+// hasta las 04:00 ET la jornada vigente sigue siendo la del día anterior.
 const ET_JORNADA_GRACE_HOUR = 4
 
-// Claves de consulta (YYYYMMDD) de la jornada vigente para ESPN:
-// - hoy ET siempre;
-// - ayer ET solo durante la ventana de madrugada (00:00–04:00 ET).
-export function jornadaDateKeys(now = new Date()) {
+// Clave de fecha ('YYYY-MM-DD') de la jornada NBA vigente: la fecha de liga
+// en ET cuyos partidos se están jugando ahora. Fuera de la ventana de
+// madrugada (00:00–04:00 ET) es la fecha actual en ET; dentro, la anterior,
+// para no perder los partidos de la noche que terminan de madrugada.
+export function currentJornadaKey(now = new Date()) {
   const today = ET_DATE_FORMATTER.format(now) // 'YYYY-MM-DD' en ET
   const hour = Number(ET_HOUR_FORMATTER.format(now))
-  const todayQuery = today.replace(/-/g, '')
-  if (hour >= ET_JORNADA_GRACE_HOUR) return [todayQuery]
-
-  const [year, month, day] = today.split('-').map(Number)
-  const yesterdayMs = Date.UTC(year, month - 1, day) - 86400000
-  const yesterdayQuery = new Date(yesterdayMs).toISOString().slice(0, 10).replace(/-/g, '')
-  return [todayQuery, yesterdayQuery]
+  if (hour >= ET_JORNADA_GRACE_HOUR) return today
+  return shiftDateKey(today, -1)
 }
 
-// Combina la jornada de hoy con los partidos de la jornada anterior que
-// siguen en juego: los finalizados de ayer se descartan (no se arrastran
-// partidos de jornadas cerradas) y los que siguen en directo se conservan
-// (el cambio de fecha nunca elimina partidos en curso).
-export function mergeJornadaGames(todayGames, yesterdayGames) {
-  if (!Array.isArray(yesterdayGames) || yesterdayGames.length === 0) {
-    return todayGames
-  }
-  const seen = new Set(todayGames.map((game) => game.id))
-  const extra = yesterdayGames.filter(
-    (game) => game.state === 'in' && !seen.has(game.id),
-  )
-  if (extra.length === 0) return todayGames
-  return [...todayGames, ...extra].sort((a, b) => a.date.localeCompare(b.date))
-}
-
-// Partidos de la jornada vigente. Se recalcula la fecha en cada consulta,
-// de modo que el cambio de jornada se detecta con la actualización
-// automática (60 s) sin recargar la página.
-export async function fetchJornada() {
-  const [todayKey, yesterdayKey] = jornadaDateKeys()
-  const todayGames = await fetchNbaScoreboard(todayKey)
-  if (!yesterdayKey) return todayGames
-  // Si la consulta de la jornada anterior falla, se mantiene la de hoy.
-  const yesterdayGames = await fetchNbaScoreboard(yesterdayKey).catch(() => null)
-  return mergeJornadaGames(todayGames, yesterdayGames)
+// Política de actualización automática para la fecha seleccionada en el
+// calendario (evita consultas innecesarias):
+// - jornada vigente: cada 60 s (marcadores y estados en directo);
+// - fecha futura: cada 5 min (cambios de horario/estado cuando corresponda);
+// - fecha pasada: sin consultas periódicas (datos históricos estables).
+// Devuelve también la jornada vigente para detectar su cambio.
+export function jornadaRefreshPlan(selectedDate, now = new Date()) {
+  const current = currentJornadaKey(now)
+  if (selectedDate === current) return { current, pollMs: 60000 }
+  if (selectedDate > current) return { current, pollMs: 300000 }
+  return { current, pollMs: null }
 }
