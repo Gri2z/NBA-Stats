@@ -23,6 +23,28 @@ const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', {
   minute: '2-digit',
 })
 
+// Fecha (YYYY-MM-DD) en hora española a partir de la fecha ISO de ESPN.
+const DATE_KEY_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+export function dateKeyFromISO(date) {
+  return DATE_KEY_FORMATTER.format(new Date(date))
+}
+
+// ESPN agrupa los partidos por fecha de liga (ET): un partido con fecha
+// española D puede estar en el día D o en el D-1 de ESPN. Se devuelven las
+// dos claves de consulta (YYYYMMDD) para no perder ninguno.
+export function etDatesForSpanishDate(dateKey) {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const utc = Date.UTC(year, month - 1, day)
+  const toQuery = (ms) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, '')
+  return [toQuery(utc), toQuery(utc - 86400000)]
+}
+
 // Estado del partido para la píldora de la tarjeta.
 const STATE_LABELS = {
   STATUS_SCHEDULED: 'Programado',
@@ -108,6 +130,7 @@ function normalizeEvent(event) {
   return {
     id: event.id,
     date: event.date,
+    dateKey: dateKeyFromISO(event.date),
     state,
     statusLabel: getStatusLabel(statusType, state),
     phaseLabel: getPhaseLabel(statusType),
@@ -117,8 +140,17 @@ function normalizeEvent(event) {
   }
 }
 
-export async function fetchNbaScoreboard() {
-  const response = await fetch(SCOREBOARD_URL, {
+// Clave de fecha de consulta para ESPN (YYYYMMDD). Solo se aceptan dígitos.
+const QUERY_DATE_PATTERN = /^\d{8}$/
+
+// `dates` permite consultar un día concreto (YYYYMMDD); sin parámetro se
+// devuelven los partidos del día de liga actual.
+export async function fetchNbaScoreboard(dates) {
+  if (dates !== undefined && !QUERY_DATE_PATTERN.test(dates)) {
+    throw new Error(`Fecha de consulta no válida: ${dates}`)
+  }
+  const url = dates ? `${SCOREBOARD_URL}?dates=${dates}` : SCOREBOARD_URL
+  const response = await fetch(url, {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
   if (!response.ok) {

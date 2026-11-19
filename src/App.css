@@ -220,7 +220,7 @@ h2 {
 .game-card {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0;
   padding: 22px;
   background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
   border: 1px solid var(--border);
@@ -338,6 +338,217 @@ h2 {
 .score-sep {
   color: var(--muted);
   font-weight: 600;
+}
+
+/* ---------- Tarjeta desplegable ---------- */
+
+.game-card-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 12px;
+}
+
+.game-card-toggle:focus-visible {
+  outline: 2px solid var(--blue-light);
+  outline-offset: 6px;
+}
+
+.game-card-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: -4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.game-card-hint svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.3s ease;
+}
+
+.game-card--open .game-card-hint svg {
+  transform: rotate(180deg);
+}
+
+/* Acordeón: la fila pasa de 0fr a 1fr y el clip oculta el desbordamiento. */
+.game-card-extra {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.32s ease;
+}
+
+.game-card--open .game-card-extra {
+  grid-template-rows: 1fr;
+}
+
+.game-card-extra-clip {
+  overflow: hidden;
+  min-height: 0;
+  visibility: hidden;
+  transition: visibility 0s linear 0.32s;
+}
+
+.game-card--open .game-card-extra-clip {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.game-card-extra-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- Probabilidades de ganar ---------- */
+
+.prob {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prob-title {
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-strong);
+}
+
+.prob-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.prob-value--away {
+  color: var(--blue-light);
+}
+
+.prob-value--home {
+  color: #a78bfa;
+}
+
+.prob-value--empty {
+  color: var(--muted);
+}
+
+.prob-bar {
+  display: flex;
+  height: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.prob-bar-seg {
+  height: 100%;
+}
+
+.prob-bar-seg--away {
+  background: var(--blue-light);
+}
+
+.prob-bar-seg--home {
+  background: #a78bfa;
+}
+
+/* ---------- Selector de ganador ---------- */
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.picker-question {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.picker-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.picker-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 11px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    color 0.2s;
+}
+
+.picker-option:hover:not(:disabled) {
+  background: var(--blue-soft);
+  border-color: rgba(47, 111, 237, 0.55);
+  color: var(--text-strong);
+}
+
+.picker-option.is-selected {
+  background: var(--blue-soft);
+  border-color: var(--blue-light);
+  color: var(--text-strong);
+}
+
+.picker-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.picker-option.is-selected:disabled {
+  opacity: 1;
+}
+
+.picker-option:focus-visible {
+  outline: 2px solid var(--blue-light);
+  outline-offset: 2px;
+}
+
+.picker-check {
+  color: var(--blue-light);
+  font-weight: 800;
+}
+
+.picker-note {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* ---------- Historial de pronósticos ---------- */
@@ -662,6 +873,15 @@ h2 {
     font-size: 20px;
   }
 
+  .picker-option {
+    padding: 10px 8px;
+    font-size: 13px;
+  }
+
+  .prob-values {
+    font-size: 18px;
+  }
+
   .history-item {
     grid-template-columns: 1fr;
     gap: 8px;
@@ -680,6 +900,12 @@ h2 {
 
   .game-card:hover {
     transform: none;
+  }
+
+  .game-card-extra,
+  .game-card-extra-clip,
+  .game-card-hint svg {
+    transition: none;
   }
 
   .spinner,

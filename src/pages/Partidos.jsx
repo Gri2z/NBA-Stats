@@ -4,6 +4,8 @@ import {
   formatGameDate,
   formatGameTime,
 } from '../api/espn.js'
+import { getWinProbability } from '../data/probabilities.js'
+import { loadPicks, resolveResults, upsertPick } from '../data/predictions.js'
 
 function statusClass(state) {
   if (state === 'in') return 'status-pill status-pill--live'
@@ -26,6 +28,11 @@ function timeLine(game) {
       .join(' · ')
   }
   return [game.statusLabel, formatGameDate(game.date)].filter(Boolean).join(' · ')
+}
+
+function formatPercent(value) {
+  if (typeof value !== 'number') return '—%'
+  return `${value.toLocaleString('es-ES')} %`
 }
 
 function TeamLogo({ team }) {
@@ -52,11 +59,196 @@ function TeamLogo({ team }) {
   )
 }
 
+// Probabilidades de ganar. Sin fuente autorizada disponible, se muestran
+// como "—%" (ver src/data/probabilities.js): nunca se inventan datos.
+function WinProbabilities({ game }) {
+  const probability = getWinProbability(game.id)
+  const awayPercent = probability?.away ?? null
+  const homePercent = probability?.home ?? null
+  const hasData = typeof awayPercent === 'number' && typeof homePercent === 'number'
+
+  return (
+    <div className="prob">
+      <p className="prob-title">Probabilidades de ganar</p>
+      <div className="prob-values">
+        <span
+          className={`prob-value prob-value--away${hasData ? '' : ' prob-value--empty'}`}
+        >
+          {formatPercent(awayPercent)}
+        </span>
+        <span
+          className={`prob-value prob-value--home${hasData ? '' : ' prob-value--empty'}`}
+        >
+          {formatPercent(homePercent)}
+        </span>
+      </div>
+      <div
+        className="prob-bar"
+        role="img"
+        aria-label={
+          hasData
+            ? `Probabilidad de victoria: ${game.away.name} ${formatPercent(awayPercent)}, ${game.home.name} ${formatPercent(homePercent)}`
+            : 'Probabilidades de ganar no disponibles'
+        }
+      >
+        {hasData && (
+          <>
+            <span
+              className="prob-bar-seg prob-bar-seg--away"
+              style={{ width: `${awayPercent}%` }}
+            />
+            <span
+              className="prob-bar-seg prob-bar-seg--home"
+              style={{ width: `${homePercent}%` }}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Selector de ganador. Solo se puede elegir (o cambiar) mientras el partido
+// está programado; la elección se guarda en localStorage.
+function WinnerPicker({ game, pick, onPick }) {
+  const locked = game.state !== 'pre'
+  const selected = pick ? pick.pickedSide : null
+
+  return (
+    <div className="picker">
+      <p className="picker-question">¿Quién crees que ganará?</p>
+      <div className="picker-options">
+        <button
+          type="button"
+          className={`picker-option${selected === 'away' ? ' is-selected' : ''}`}
+          disabled={locked}
+          aria-pressed={selected === 'away'}
+          onClick={() => onPick('away')}
+        >
+          {selected === 'away' && (
+            <span className="picker-check" aria-hidden="true">
+              ✓
+            </span>
+          )}
+          {game.away.name}
+        </button>
+        <button
+          type="button"
+          className={`picker-option${selected === 'home' ? ' is-selected' : ''}`}
+          disabled={locked}
+          aria-pressed={selected === 'home'}
+          onClick={() => onPick('home')}
+        >
+          {selected === 'home' && (
+            <span className="picker-check" aria-hidden="true">
+              ✓
+            </span>
+          )}
+          {game.home.name}
+        </button>
+      </div>
+      <p className="picker-note">
+        {locked
+          ? 'Las elecciones están cerradas: el partido ya ha comenzado.'
+          : 'Tu elección se guarda en este navegador.'}
+      </p>
+    </div>
+  )
+}
+
+function GameCard({ game, pick, onPick }) {
+  const [open, setOpen] = useState(false)
+  const hasScore =
+    game.state !== 'pre' &&
+    game.home.score !== null &&
+    game.away.score !== null
+  const panelId = `game-extra-${game.id}`
+
+  return (
+    <article
+      className={`game-card${game.state === 'in' ? ' game-card--live' : ''}${
+        open ? ' game-card--open' : ''
+      }`}
+    >
+      <button
+        type="button"
+        className="game-card-toggle"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="game-card-top">
+          <span className="game-tag">NBA</span>
+          <span className={statusClass(game.state)}>
+            {game.state === 'in' && (
+              <span className="live-dot" aria-hidden="true" />
+            )}
+            {game.statusLabel}
+          </span>
+        </span>
+        <span className="game-time">{timeLine(game)}</span>
+        <span className="matchup">
+          <span className="team">
+            <TeamLogo team={game.away} />
+            <span className="team-name">{game.away.name}</span>
+          </span>
+          {hasScore ? (
+            <span
+              className="matchup-score"
+              aria-label={`Marcador: ${game.away.name} ${game.away.score}, ${game.home.name} ${game.home.score}`}
+            >
+              <span className={scoreClass(game.away, game.state)}>
+                {game.away.score}
+              </span>
+              <span className="score-sep" aria-hidden="true">
+                –
+              </span>
+              <span className={scoreClass(game.home, game.state)}>
+                {game.home.score}
+              </span>
+            </span>
+          ) : (
+            <span className="at">@</span>
+          )}
+          <span className="team">
+            <TeamLogo team={game.home} />
+            <span className="team-name">{game.home.name}</span>
+          </span>
+        </span>
+        <span className="game-card-hint">
+          {open ? 'Ocultar' : 'Ver detalles'}
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 6l4 4 4-4" />
+          </svg>
+        </span>
+      </button>
+
+      <div className="game-card-extra" id={panelId}>
+        <div className="game-card-extra-clip">
+          <div className="game-card-extra-body">
+            <WinProbabilities game={game} />
+            <WinnerPicker game={game} pick={pick} onPick={onPick} />
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
 function PartidosPage() {
   const [games, setGames] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [picks, setPicks] = useState(loadPicks)
 
   useEffect(() => {
     let active = true
@@ -67,6 +259,9 @@ function PartidosPage() {
         if (!active) return
         setGames(data)
         setError(null)
+        // Resuelve con los resultados reales de ESPN las elecciones
+        // guardadas cuyo partido ya haya terminado.
+        setPicks(resolveResults(loadPicks(), data))
       } catch (err) {
         if (!active) return
         const message =
@@ -92,6 +287,11 @@ function PartidosPage() {
     setError(null)
     setGames(null)
     setReloadKey((key) => key + 1)
+  }
+
+  const handlePick = (game, side) => {
+    if (game.state !== 'pre') return
+    setPicks(upsertPick(game, side))
   }
 
   return (
@@ -134,60 +334,14 @@ function PartidosPage() {
 
       {games !== null && games.length > 0 && (
         <div className="games-grid">
-          {games.map((game) => {
-            const hasScore =
-              game.state !== 'pre' &&
-              game.home.score !== null &&
-              game.away.score !== null
-
-            return (
-              <article
-                key={game.id}
-                className={`game-card${
-                  game.state === 'in' ? ' game-card--live' : ''
-                }`}
-              >
-                <div className="game-card-top">
-                  <span className="game-tag">NBA</span>
-                  <span className={statusClass(game.state)}>
-                    {game.state === 'in' && (
-                      <span className="live-dot" aria-hidden="true" />
-                    )}
-                    {game.statusLabel}
-                  </span>
-                </div>
-                <p className="game-time">{timeLine(game)}</p>
-                <div className="matchup">
-                  <div className="team">
-                    <TeamLogo team={game.away} />
-                    <span className="team-name">{game.away.name}</span>
-                  </div>
-                  {hasScore ? (
-                    <span
-                      className="matchup-score"
-                      aria-label={`Marcador: ${game.away.name} ${game.away.score}, ${game.home.name} ${game.home.score}`}
-                    >
-                      <span className={scoreClass(game.away, game.state)}>
-                        {game.away.score}
-                      </span>
-                      <span className="score-sep" aria-hidden="true">
-                        –
-                      </span>
-                      <span className={scoreClass(game.home, game.state)}>
-                        {game.home.score}
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="at">@</span>
-                  )}
-                  <div className="team">
-                    <TeamLogo team={game.home} />
-                    <span className="team-name">{game.home.name}</span>
-                  </div>
-                </div>
-              </article>
-            )
-          })}
+          {games.map((game) => (
+            <GameCard
+              key={game.id}
+              game={game}
+              pick={picks.find((item) => item.id === game.id) ?? null}
+              onPick={(side) => handlePick(game, side)}
+            />
+          ))}
         </div>
       )}
     </section>

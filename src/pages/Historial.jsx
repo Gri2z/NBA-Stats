@@ -1,4 +1,14 @@
-import { formatDayLabel, groupPredictionsByDate } from '../data/predictions.js'
+import { useEffect, useState } from 'react'
+import {
+  etDatesForSpanishDate,
+  fetchNbaScoreboard,
+} from '../api/espn.js'
+import {
+  formatDayLabel,
+  groupPredictionsByDate,
+  loadPicks,
+  resolveResults,
+} from '../data/predictions.js'
 
 const RESULT_LABELS = {
   win: 'Acierto',
@@ -27,7 +37,62 @@ function EmptyIcon() {
 }
 
 function HistorialPage() {
-  const days = groupPredictionsByDate()
+  const [picks, setPicks] = useState(loadPicks)
+  const [loading, setLoading] = useState(() => loadPicks().length > 0)
+  const [error, setError] = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
+
+  // Consulta a ESPN los partidos de cada fecha con pronóstico para saber el
+  // resultado real. Si no hay pronósticos, no se hace ninguna petición.
+  useEffect(() => {
+    let active = true
+
+    async function load() {
+      const stored = loadPicks()
+      if (stored.length === 0) {
+        // Sin pronósticos no hay nada que consultar ni que mostrar.
+        if (active) {
+          setPicks((current) => (current.length > 0 ? [] : current))
+          setError(null)
+          setLoading(false)
+        }
+        return
+      }
+
+      setLoading(true)
+      try {
+        const dateKeys = [...new Set(stored.map((item) => item.date))]
+        const queryDates = [
+          ...new Set(dateKeys.flatMap((dateKey) => etDatesForSpanishDate(dateKey))),
+        ]
+        const results = await Promise.all(
+          queryDates.map((dates) => fetchNbaScoreboard(dates)),
+        )
+        if (!active) return
+        const games = results.flat()
+        setPicks(resolveResults(stored, games))
+        setError(null)
+      } catch (err) {
+        if (!active) return
+        const message =
+          err instanceof Error && err.name === 'TimeoutError'
+            ? 'ESPN no ha respondido a tiempo. Comprueba tu conexión.'
+            : 'ESPN no responde en este momento. Inténtalo de nuevo en unos segundos.'
+        setError(message)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    load()
+    return () => {
+      active = false
+    }
+  }, [reloadKey])
+
+  const handleRetry = () => setReloadKey((key) => key + 1)
+
+  const days = groupPredictionsByDate(picks)
 
   return (
     <section className="section" id="historial">
@@ -43,17 +108,36 @@ function HistorialPage() {
         resultado de cada uno.
       </p>
 
-      {days.length === 0 ? (
+      {loading && (
+        <div className="state-box" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <p>Comprobando resultados en ESPN…</p>
+        </div>
+      )}
+
+      {error && !loading && (
+        <div className="state-box state-box--error" role="alert">
+          <p className="state-title">No se han podido cargar los resultados</p>
+          <p>{error}</p>
+          <button type="button" className="retry-button" onClick={handleRetry}>
+            Reintentar
+          </button>
+        </div>
+      )}
+
+      {!loading && days.length === 0 && (
         <div className="state-box">
           <EmptyIcon />
           <p className="state-title">Todavía no hay pronósticos registrados</p>
           <p>
-            El sistema de pronósticos aún no está implementado. Cuando lo esté,
-            aquí verás cada fecha con los partidos pronosticados, el equipo
-            elegido y si acertaste o fallaste.
+            Elige un equipo en la página de Partidos: aquí verás cada fecha con
+            tus pronósticos, el equipo elegido y si acertaste o fallaste cuando
+            el partido termine.
           </p>
         </div>
-      ) : (
+      )}
+
+      {!loading && days.length > 0 && (
         <div className="history-days">
           {days.map((day) => (
             <article key={day.date} className="history-day">
