@@ -213,6 +213,9 @@ h2 {
 .games-grid {
   display: grid;
   grid-template-columns: 1fr;
+  /* Las tarjetas conservan su altura natural: solo la abierta crece y las
+     de su fila no se estiran (evita espacios vacíos dentro de las tarjetas). */
+  align-items: start;
   gap: 20px;
   margin-top: 28px;
 }

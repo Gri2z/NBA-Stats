@@ -87,6 +87,16 @@ export function upsertPick(game, pickedSide) {
   return next
 }
 
+// Elimina la elección de un partido (deselección) y la borra del
+// localStorage. Las demás elecciones quedan intactas. Solo se debe llamar
+// mientras el partido está programado ('pre').
+export function removePick(gameId) {
+  const picks = loadPicks()
+  const next = picks.filter((item) => item.id !== gameId)
+  if (next.length !== picks.length) savePicks(next)
+  return next
+}
+
 // ---------- Resolución de resultados con datos de ESPN ----------
 
 // Resultado real de una elección según el partido devuelto por ESPN.

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import {
-  fetchNbaScoreboard,
-  formatGameDate,
-  formatGameTime,
-} from '../api/espn.js'
+import { fetchJornada, formatGameLine } from '../api/espn.js'
 import { getWinProbability } from '../data/probabilities.js'
-import { loadPicks, resolveResults, upsertPick } from '../data/predictions.js'
+import {
+  loadPicks,
+  removePick,
+  resolveResults,
+  upsertPick,
+} from '../data/predictions.js'
 
 function statusClass(state) {
   if (state === 'in') return 'status-pill status-pill--live'
@@ -16,18 +17,6 @@ function statusClass(state) {
 function scoreClass(team, state) {
   if (state === 'post' && !team.winner) return 'score score--lose'
   return 'score'
-}
-
-function timeLine(game) {
-  if (game.state === 'pre') {
-    return `${formatGameDate(game.date)} · ${formatGameTime(game.date)} h`
-  }
-  if (game.state === 'in') {
-    return [game.phaseLabel ?? 'En directo', game.clock]
-      .filter(Boolean)
-      .join(' · ')
-  }
-  return [game.statusLabel, formatGameDate(game.date)].filter(Boolean).join(' · ')
 }
 
 function formatPercent(value) {
@@ -108,8 +97,9 @@ function WinProbabilities({ game }) {
   )
 }
 
-// Selector de ganador. Solo se puede elegir (o cambiar) mientras el partido
-// está programado; la elección se guarda en localStorage.
+// Selector de ganador. Solo se puede elegir, cambiar o deseleccionar mientras
+// el partido está programado; la elección se guarda en localStorage. Pulsar el
+// equipo ya seleccionado la elimina.
 function WinnerPicker({ game, pick, onPick }) {
   const locked = game.state !== 'pre'
   const selected = pick ? pick.pickedSide : null
@@ -156,8 +146,9 @@ function WinnerPicker({ game, pick, onPick }) {
   )
 }
 
-function GameCard({ game, pick, onPick }) {
-  const [open, setOpen] = useState(false)
+// Tarjeta con desplegable. El estado de apertura lo controla la página para
+// que solo pueda haber un desplegable abierto a la vez.
+function GameCard({ game, pick, open, onToggle, onPick }) {
   const hasScore =
     game.state !== 'pre' &&
     game.home.score !== null &&
@@ -175,7 +166,7 @@ function GameCard({ game, pick, onPick }) {
         className="game-card-toggle"
         aria-expanded={open}
         aria-controls={panelId}
-        onClick={() => setOpen((current) => !current)}
+        onClick={onToggle}
       >
         <span className="game-card-top">
           <span className="game-tag">NBA</span>
@@ -186,7 +177,7 @@ function GameCard({ game, pick, onPick }) {
             {game.statusLabel}
           </span>
         </span>
-        <span className="game-time">{timeLine(game)}</span>
+        <span className="game-time">{formatGameLine(game)}</span>
         <span className="matchup">
           <span className="team">
             <TeamLogo team={game.away} />
@@ -249,13 +240,18 @@ function PartidosPage() {
   const [error, setError] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [picks, setPicks] = useState(loadPicks)
+  // Solo un desplegable abierto a la vez (id del partido, o null).
+  const [openGameId, setOpenGameId] = useState(null)
 
   useEffect(() => {
     let active = true
 
     async function load() {
       try {
-        const data = await fetchNbaScoreboard()
+        // Consulta la jornada vigente (fecha ET recalculada en cada
+        // llamada): el cambio de jornada se detecta en esta misma
+        // actualización de 60 s, sin recargar la página.
+        const data = await fetchJornada()
         if (!active) return
         setGames(data)
         setError(null)
@@ -289,8 +285,20 @@ function PartidosPage() {
     setReloadKey((key) => key + 1)
   }
 
+  const handleToggle = (gameId) => {
+    // Al abrir uno se cierra automáticamente el que estuviera abierto.
+    setOpenGameId((current) => (current === gameId ? null : gameId))
+  }
+
   const handlePick = (game, side) => {
+    // Sin elecciones ni cambios cuando el partido ya ha comenzado.
     if (game.state !== 'pre') return
+    const current = picks.find((item) => item.id === game.id)
+    if (current && current.pickedSide === side) {
+      // Pulsar el equipo ya elegido deselecciona (y borra el registro).
+      setPicks(removePick(game.id))
+      return
+    }
     setPicks(upsertPick(game, side))
   }
 
@@ -338,6 +346,8 @@ function PartidosPage() {
             <GameCard
               key={game.id}
               game={game}
+              open={openGameId === game.id}
+              onToggle={() => handleToggle(game.id)}
               pick={picks.find((item) => item.id === game.id) ?? null}
               onPick={(side) => handlePick(game, side)}
             />
